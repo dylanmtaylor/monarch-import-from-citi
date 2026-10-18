@@ -78,16 +78,19 @@ The CLI supports modular workflows:
 
 - **`all`**: Complete pipeline — captures from browser (or input file), parses statement checkpoints and transactions, and exports Monarch CSVs.
   ```bash
-  citi-to-monarch all [--port 9222] [--output-dir output] [--cache-file citi_raw_data.json]
+  citi-to-monarch all [--port 9222] [--output-dir output] [--cache-file citi_raw_data.json] [--statements-dir statements]
   ```
 - **`capture`**: Capture raw Citi account data, statement catalog, PDFs, and transactions to a JSON cache file.
   ```bash
   citi-to-monarch capture [--output-file citi_raw_data.json] [--cache-dir raw_statements]
   ```
-- **`convert`**: Convert an existing JSON cache file to Monarch CSVs without connecting to the browser.
+- **`convert`**: Convert an existing JSON cache file to Monarch CSVs without connecting to the browser, merging any historical statement PDFs:
   ```bash
-  citi-to-monarch convert citi_raw_data.json [--output-dir output]
+  citi-to-monarch convert citi_raw_data.json [--statements-dir statements] [--output-dir output]
   ```
+
+### Backfilling Historical Statements
+Citi makes up to 24 months of statement PDFs available immediately in the online portal, with older statements (back to account opening) available upon request via Citi's Archived Statements portal. Any downloaded statement PDFs placed in `statements/` (or specified via `--statements-dir`) will automatically be parsed, merged with transactions, and stitched into continuous daily balance history.
 
 ---
 
