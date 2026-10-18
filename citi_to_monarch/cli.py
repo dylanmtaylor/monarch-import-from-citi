@@ -7,7 +7,7 @@ import sys
 from typing import Optional
 
 from citi_to_monarch.cdp import CDPSession, CDPError
-from citi_to_monarch.parser import parse_citi_dataset
+from citi_to_monarch.parser import parse_citi_dataset, parse_citi_statements_dir
 from citi_to_monarch.exporter import Exporter
 
 
@@ -17,6 +17,7 @@ def run_pipeline(
     output_dir: str = "output",
     cache_file: Optional[str] = "citi_raw_data.json",
     cache_dir: str = "raw_statements",
+    statements_dir: Optional[str] = "statements",
     include_pdfs: bool = True,
     max_pdf_statements: Optional[int] = None,
     invert_liability: bool = True,
@@ -59,6 +60,12 @@ def run_pipeline(
     print("Parsing statements and transactions...")
     account = parse_citi_dataset(raw_data)
 
+    if statements_dir and os.path.exists(statements_dir):
+        print(f"Parsing statement PDFs from '{statements_dir}'...")
+        pdf_stmts = parse_citi_statements_dir(statements_dir)
+        print(f"Found {len(pdf_stmts)} statement PDFs.")
+        account.merge_statement_pdf_data(pdf_stmts)
+
     print("Exporting continuous daily balances and transactions to Monarch CSVs...")
     exporter = Exporter(output_dir=output_dir)
     exporter.export_account(account, invert_liability=invert_liability)
@@ -95,6 +102,7 @@ def run_capture(
 def run_convert(
     input_file: str,
     output_dir: str = "output",
+    statements_dir: Optional[str] = "statements",
     invert_liability: bool = True,
 ):
     """Convert an existing JSON cache file to Monarch CSVs."""
@@ -108,6 +116,12 @@ def run_convert(
 
     print("Parsing Citi statements and transactions...")
     account = parse_citi_dataset(raw_data)
+
+    if statements_dir and os.path.exists(statements_dir):
+        print(f"Parsing statement PDFs from '{statements_dir}'...")
+        pdf_stmts = parse_citi_statements_dir(statements_dir)
+        print(f"Found {len(pdf_stmts)} statement PDFs.")
+        account.merge_statement_pdf_data(pdf_stmts)
 
     print("Exporting to Monarch CSV files...")
     exporter = Exporter(output_dir=output_dir)
@@ -127,6 +141,7 @@ def main():
     p_all.add_argument("--output-dir", type=str, default="output", help="Directory for exported CSVs")
     p_all.add_argument("--cache-file", type=str, default="citi_raw_data.json", help="Path to save captured JSON")
     p_all.add_argument("--cache-dir", type=str, default="raw_statements", help="Directory to save downloaded PDFs")
+    p_all.add_argument("--statements-dir", type=str, default="statements", help="Directory containing statement PDFs")
     p_all.add_argument("--no-pdfs", action="store_false", dest="include_pdfs", help="Skip downloading statement PDFs")
     p_all.add_argument("--max-pdf-statements", type=int, default=None, help="Limit number of statement PDFs to download")
     p_all.add_argument(
@@ -150,6 +165,7 @@ def main():
     p_conv = subparsers.add_parser("convert", help="Convert existing raw Citi JSON file to Monarch CSVs")
     p_conv.add_argument("input_file", type=str, help="Path to raw JSON file")
     p_conv.add_argument("--output-dir", type=str, default="output", help="Directory for exported CSVs")
+    p_conv.add_argument("--statements-dir", type=str, default="statements", help="Directory containing statement PDFs")
     p_conv.add_argument(
         "--positive-balances",
         action="store_false",
@@ -169,6 +185,7 @@ def main():
             output_dir=getattr(args, "output_dir", "output"),
             cache_file=getattr(args, "cache_file", "citi_raw_data.json"),
             cache_dir=getattr(args, "cache_dir", "raw_statements"),
+            statements_dir=getattr(args, "statements_dir", "statements"),
             include_pdfs=getattr(args, "include_pdfs", True),
             max_pdf_statements=getattr(args, "max_pdf_statements", None),
             invert_liability=getattr(args, "invert_liability", True),
@@ -187,6 +204,7 @@ def main():
         run_convert(
             input_file=args.input_file,
             output_dir=args.output_dir,
+            statements_dir=getattr(args, "statements_dir", "statements"),
             invert_liability=args.invert_liability,
         )
 

@@ -8,6 +8,7 @@ from citi_to_monarch.parser import (
     clean_merchant_name,
     infer_category,
     parse_citi_pdf_statement,
+    parse_citi_statements_dir,
     parse_citi_dataset,
     CitiTransaction,
     StatementPeriod,
@@ -181,6 +182,83 @@ New balance $1,250.00
         self.assertEqual(len(purchases), 2)
         self.assertEqual(len(payments), 1)
         self.assertEqual(payments[0].amount, 200.00)
+
+    def test_parse_citi_pdf_statement_synthetic_str(self):
+        """Test parsing of statement PDF directly from synthetic layout string."""
+        synthetic_text = """
+Billing Period: 08/10/26-09/09/26
+New balance as of 09/09/26: $845.50
+Account Summary
+Previous balance $1,200.00
+Payments -$1,200.00
+Credits -$0.00
+Purchases +$845.50
+Fees +$0.00
+Interest +$0.00
+New balance $845.50
+
+08/12 08/12 ONLINE PAYMENT, THANK YOU -$1,200.00
+08/18 08/19 SAMPLE BOOKSTORE SEATTLE WA $45.50
+08/25 08/26 SAMPLE GROCERY MARKET PORTLAND OR $800.00
+        """
+        stmt = parse_citi_pdf_statement(synthetic_text)
+        self.assertEqual(stmt.statement_date, "2026-09-09")
+        self.assertEqual(stmt.start_date, "2026-08-10")
+        self.assertEqual(stmt.end_date, "2026-09-09")
+        self.assertEqual(stmt.previous_balance, 1200.00)
+        self.assertEqual(stmt.closing_balance, 845.50)
+        self.assertEqual(stmt.purchases, 845.50)
+        self.assertEqual(stmt.payments_and_credits, 1200.00)
+        self.assertEqual(len(stmt.transactions), 3)
+        self.assertEqual(stmt.transactions[0].amount, 1200.00)
+        self.assertEqual(stmt.transactions[1].amount, -45.50)
+        self.assertEqual(stmt.transactions[2].amount, -800.00)
+
+    def test_merge_statement_pdf_data(self):
+        """Test merging PDF statement periods into CitiAccount."""
+        account = CitiAccount(
+            card_name="Citi Double Cash Synthetic - 9999",
+            account_number="9999",
+            current_balance=50.00,
+        )
+        existing_stmt = StatementPeriod(
+            statement_date="2026-10-09",
+            start_date="2026-09-10",
+            end_date="2026-10-09",
+            previous_balance=0.0,
+            closing_balance=0.0,
+        )
+        account.statements = [existing_stmt]
+
+        new_pdf_stmts = [
+            StatementPeriod(
+                statement_date="2026-09-09",
+                start_date="2026-08-10",
+                end_date="2026-09-09",
+                previous_balance=100.0,
+                closing_balance=200.0,
+            ),
+            StatementPeriod(
+                statement_date="2026-10-09",
+                start_date="2026-09-10",
+                end_date="2026-10-09",
+                previous_balance=200.0,
+                closing_balance=500.0,
+            ),
+        ]
+
+        account.merge_statement_pdf_data(new_pdf_stmts)
+        self.assertEqual(len(account.statements), 2)
+        self.assertEqual(account.statements[0].end_date, "2026-09-09")
+        self.assertEqual(account.statements[0].closing_balance, 200.0)
+        self.assertEqual(account.statements[1].end_date, "2026-10-09")
+        # Should be updated with real closing balance
+        self.assertEqual(account.statements[1].closing_balance, 500.0)
+
+    def test_parse_citi_statements_dir_empty_or_nonexistent(self):
+        """Test parsing statements from empty or nonexistent directory."""
+        stmts = parse_citi_statements_dir("/nonexistent/path/for/tests")
+        self.assertEqual(stmts, [])
 
 
 if __name__ == "__main__":

@@ -64,7 +64,7 @@ class TestCLI(unittest.TestCase):
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(self.synthetic_payload, f)
 
-            run_convert(input_file=json_path, output_dir=out_dir)
+            run_convert(input_file=json_path, output_dir=out_dir, statements_dir=os.path.join(tmpdir, "statements"))
 
             bal_file = os.path.join(out_dir, "citi_balances_citi_double_cash_synthetic_1111_1111.csv")
             txn_file = os.path.join(out_dir, "citi_transactions_citi_double_cash_synthetic_1111_1111.csv")
@@ -83,6 +83,7 @@ class TestCLI(unittest.TestCase):
             run_pipeline(
                 input_file=json_path,
                 output_dir=out_dir,
+                statements_dir=os.path.join(tmpdir, "statements"),
                 cache_file=None,
             )
 

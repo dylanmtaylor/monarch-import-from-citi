@@ -1,11 +1,13 @@
 """Parser for Citi credit card statements, raw transaction JSON, and PDF files."""
 
+import os
+import glob
 import base64
 import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union, Tuple
 
 
 @dataclass
@@ -96,6 +98,31 @@ class CitiAccount:
 
         all_txns.sort(key=lambda t: (t.date, t.original_statement))
         return all_txns
+
+    def merge_statement_pdf_data(self, statements: List[StatementPeriod]) -> None:
+        """
+        Merge statement periods from PDFs into the account statements list,
+        avoiding duplicate periods based on end_date.
+        """
+        existing_by_date = {s.end_date: s for s in self.statements if s.end_date}
+        for s in statements:
+            if not s.end_date:
+                continue
+            if s.end_date in existing_by_date:
+                existing = existing_by_date[s.end_date]
+                if (not existing.transactions and s.transactions) or (existing.closing_balance == 0.0 and s.closing_balance != 0.0):
+                    existing.closing_balance = s.closing_balance
+                    existing.previous_balance = s.previous_balance
+                    existing.purchases = s.purchases
+                    existing.payments_and_credits = s.payments_and_credits
+                    existing.fees = s.fees
+                    existing.interest = s.interest
+                    existing.transactions = s.transactions
+            else:
+                existing_by_date[s.end_date] = s
+                self.statements.append(s)
+
+        self.statements.sort(key=lambda s: s.end_date)
 
     def compute_daily_balances(self, invert_liability: bool = True) -> List[Dict[str, Any]]:
         """
@@ -345,19 +372,30 @@ def infer_category(desc: str, amount: float, raw_category: Optional[str] = None)
     return "Credit Card Payment" if amount > 0 else "Shopping"
 
 
-def parse_citi_pdf_statement(pdf_bytes: bytes) -> StatementPeriod:
+def parse_citi_pdf_statement(pdf_input: Union[bytes, str]) -> StatementPeriod:
     """
-    Parse a Citi credit card statement PDF binary into a structured StatementPeriod object.
+    Parse a Citi credit card statement PDF binary, file path, or text into a structured StatementPeriod object.
     Uses pdftotext layout alignment, extracting billing period, previous balance,
     closing balance, payments, credits, purchases, fees, and individual transactions.
     """
     text = ""
-    try:
-        proc = subprocess.run(["pdftotext", "-layout", "-", "-"], input=pdf_bytes, capture_output=True)
-        if proc.returncode == 0 and proc.stdout:
-            text = proc.stdout.decode("utf-8", errors="ignore")
-    except Exception:
-        pass
+    if isinstance(pdf_input, bytes):
+        try:
+            proc = subprocess.run(["pdftotext", "-layout", "-", "-"], input=pdf_input, capture_output=True)
+            if proc.returncode == 0 and proc.stdout:
+                text = proc.stdout.decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+    elif isinstance(pdf_input, str):
+        if os.path.isfile(pdf_input):
+            try:
+                proc = subprocess.run(["pdftotext", "-layout", pdf_input, "-"], capture_output=True)
+                if proc.returncode == 0 and proc.stdout:
+                    text = proc.stdout.decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+        else:
+            text = pdf_input
 
     start_date_str = ""
     end_date_str = ""
@@ -448,6 +486,33 @@ def parse_citi_pdf_statement(pdf_bytes: bytes) -> StatementPeriod:
         interest=interest,
         transactions=transactions,
     )
+
+
+def parse_citi_statements_dir(directory: str) -> List[StatementPeriod]:
+    """
+    Parse all Citi statement PDFs in a directory.
+    Returns List[StatementPeriod] sorted chronologically by end_date.
+    """
+    if not os.path.exists(directory):
+        return []
+
+    pdf_files = sorted(glob.glob(os.path.join(directory, "*.pdf")))
+    statements = []
+
+    for p in pdf_files:
+        try:
+            with open(p, "rb") as fp:
+                hdr = fp.read(5)
+                if not hdr.startswith(b"%PDF"):
+                    continue
+            stmt = parse_citi_pdf_statement(p)
+            if stmt.end_date:
+                statements.append(stmt)
+        except Exception:
+            continue
+
+    statements.sort(key=lambda s: s.end_date)
+    return statements
 
 
 def parse_citi_dataset(raw_data: Dict[str, Any]) -> CitiAccount:
