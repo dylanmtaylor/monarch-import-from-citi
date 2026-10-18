@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 from unittest.mock import patch
-from citi_to_monarch.cli import run_convert, run_pipeline
+from citi_to_monarch.cli import run_convert, run_pipeline, run_check_archives
 
 
 class TestCLI(unittest.TestCase):
@@ -92,6 +92,30 @@ class TestCLI(unittest.TestCase):
 
             self.assertTrue(os.path.exists(bal_file))
             self.assertTrue(os.path.exists(txn_file))
+
+    @patch("citi_to_monarch.cli.CDPSession")
+    def test_run_check_archives(self, mock_cdp_class):
+        """Test check-archives logic with mock CDP session."""
+        mock_instance = mock_cdp_class.return_value.__enter__.return_value
+        mock_instance.get_account_overview.return_value = self.synthetic_payload["account_overview"]
+        mock_instance.fetch_archived_statements_catalog.return_value = {
+            "archivedStatementsByMonth": [
+                {"statementDate": "202410", "statusIndicator": "P", "displayDate": "Oct 2024"},
+                {"statementDate": "202409", "statusIndicator": "A", "displayDate": "Sep 2024"},
+            ]
+        }
+        mock_instance.fetch_archived_statement_pdf_base64.return_value = "JVBERi0xLjQK"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stmts_dir = os.path.join(tmpdir, "statements")
+            run_check_archives(
+                port=9222,
+                statements_dir=stmts_dir,
+                output_dir=os.path.join(tmpdir, "output"),
+                cache_file=os.path.join(tmpdir, "nonexistent.json"),
+                download_ready=True,
+            )
+            self.assertTrue(os.path.exists(os.path.join(stmts_dir, "202409.pdf")))
 
 
 if __name__ == "__main__":

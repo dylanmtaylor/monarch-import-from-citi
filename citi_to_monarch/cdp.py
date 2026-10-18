@@ -267,6 +267,95 @@ class CDPSession:
         """
         return self.evaluate(js_code)
 
+    def fetch_archived_statements_catalog(self, account_id: str) -> Dict[str, Any]:
+        """Fetch catalog of archived statements and their retrieval readiness status."""
+        js_code = f"""
+        (async () => {{
+            function getCookie(name) {{
+                let match = document.cookie.match(new RegExp('(^|;\\\\s*)(' + name + ')=([^;]*)'));
+                return match ? match[3] : null;
+            }}
+
+            const headers = {{
+                'client_id': getCookie('client_id') || '4a51fb19-a1a7-4247-bc7e-18aa56dd1c40',
+                'businessCode': getCookie('businessCode') || 'GCB',
+                'countryCode': getCookie('countryCode') || 'US',
+                'channelId': getCookie('channelId') || 'CBOL',
+                'uuid': getCookie('speedLogin_uuid') || '',
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json;charset=UTF-8',
+                'citi-correlation-id': 'req-' + Date.now()
+            }};
+
+            const url = '/gcgapi/prod/public/v1/v2/digital/card/accounts/statements/archiveStatements/retrieve';
+            const resp = await fetch(url, {{
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({{ accountId: {json.dumps(account_id)} }}),
+                credentials: 'include'
+            }});
+
+            if (!resp.ok) {{
+                throw new Error(`Failed to fetch archived statements catalog: HTTP ${{resp.status}}`);
+            }}
+            return await resp.json();
+        }})()
+        """
+        return self.evaluate(js_code)
+
+    def fetch_archived_statement_pdf_base64(self, account_id: str, statement_date: str) -> str:
+        """Fetch archived statement PDF binary content as base64 string."""
+        js_code = f"""
+        (async () => {{
+            function getCookie(name) {{
+                let match = document.cookie.match(new RegExp('(^|;\\\\s*)(' + name + ')=([^;]*)'));
+                return match ? match[3] : null;
+            }}
+
+            const headers = {{
+                'client_id': getCookie('client_id') || '4a51fb19-a1a7-4247-bc7e-18aa56dd1c40',
+                'businessCode': getCookie('businessCode') || 'GCB',
+                'countryCode': getCookie('countryCode') || 'US',
+                'channelId': getCookie('channelId') || 'CBOL',
+                'uuid': getCookie('speedLogin_uuid') || '',
+                'Accept': 'application/json, text/plain, */*',
+                'Content-Type': 'application/json;charset=UTF-8',
+                'citi-correlation-id': 'req-' + Date.now()
+            }};
+
+            const url = '/gcgapi/prod/public/v1/v2/digital/card/accounts/statements/recent/retrieve';
+            const body = JSON.stringify({{
+                accountId: {json.dumps(account_id)},
+                statementDate: {json.dumps(statement_date)},
+                requestType: "ARCHIVED STATEMENTS"
+            }});
+
+            const resp = await fetch(url, {{
+                method: 'POST',
+                headers: headers,
+                body: body,
+                credentials: 'include'
+            }});
+
+            if (!resp.ok) {{
+                throw new Error(`Failed to fetch archived PDF statement for ${{statement_date}}: HTTP ${{resp.status}}`);
+            }}
+
+            const blob = await resp.blob();
+            return new Promise((resolve, reject) => {{
+                const reader = new FileReader();
+                reader.onloadend = () => {{
+                    const res = reader.result;
+                    const b64 = res.split(',')[1];
+                    resolve(b64);
+                }};
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            }});
+        }})()
+        """
+        return self.evaluate(js_code)
+
     def fetch_transactions_page(
         self,
         account_id: str,

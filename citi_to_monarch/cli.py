@@ -128,6 +128,68 @@ def run_convert(
     exporter.export_account(account, invert_liability=invert_liability)
 
 
+def run_check_archives(
+    port: int = 9222,
+    tab_id: Optional[str] = None,
+    statements_dir: str = "statements",
+    output_dir: str = "output",
+    cache_file: str = "citi_raw_data.json",
+    download_ready: bool = True,
+    invert_liability: bool = True,
+):
+    """Check status of Citi archived statements and download any ready PDFs."""
+    os.makedirs(statements_dir, exist_ok=True)
+    print(f"Connecting to Chrome on port {port}...")
+    try:
+        with CDPSession(port=port, tab_id=tab_id) as session:
+            overview = session.get_account_overview()
+            ledger_data = overview.get("balances_data", {}).get("accountLedgerData", [])
+            if not ledger_data:
+                raise CDPError("No credit card accounts found in Citi balance inquiry.")
+            account_id = ledger_data[0].get("accountId")
+            print(f"Checking archived statements for account ID: {account_id}...")
+            arch_data = session.fetch_archived_statements_catalog(account_id)
+            statements = arch_data.get("archivedStatementsByMonth", [])
+            print(f"Total archived statement requests registered with Citi: {len(statements)}")
+
+            processing = [s for s in statements if s.get("statusIndicator") == "P"]
+            ready = [s for s in statements if s.get("statusIndicator") != "P"]
+            print(f"  Processing (in 24-48h queue): {len(processing)}")
+            print(f"  Ready for download:          {len(ready)}")
+
+            downloaded_count = 0
+            if download_ready and ready:
+                import base64
+                for s in ready:
+                    s_date = s.get("statementDate")
+                    disp = s.get("displayDate", s_date)
+                    pdf_filename = f"{s_date}.pdf"
+                    pdf_path = os.path.join(statements_dir, pdf_filename)
+                    if os.path.exists(pdf_path):
+                        continue
+                    print(f"Downloading ready statement {disp} ({s_date})...")
+                    try:
+                        b64 = session.fetch_archived_statement_pdf_base64(account_id, s_date)
+                        with open(pdf_path, "wb") as f:
+                            f.write(base64.b64decode(b64))
+                        downloaded_count += 1
+                    except Exception as e:
+                        print(f"Warning: Failed to download archive statement {s_date}: {e}")
+                print(f"Downloaded {downloaded_count} new archived statement PDFs.")
+
+                if downloaded_count > 0 and os.path.exists(cache_file):
+                    print("Re-running conversion to incorporate newly downloaded archives...")
+                    run_convert(
+                        input_file=cache_file,
+                        output_dir=output_dir,
+                        statements_dir=statements_dir,
+                        invert_liability=invert_liability,
+                    )
+    except CDPError as e:
+        print(f"CDP Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Extract Citi credit card activity and continuous daily balances into Monarch Money CSVs."
@@ -173,6 +235,21 @@ def main():
         help="Export debt balances as positive numbers instead of negative liabilities",
     )
 
+    # Command: check-archives
+    p_arch = subparsers.add_parser("check-archives", help="Check status of Citi archived statements and download ready PDFs")
+    p_arch.add_argument("--port", type=int, default=9222, help="Chrome CDP port (default: 9222)")
+    p_arch.add_argument("--tab-id", type=str, default=None, help="Specific Chrome tab ID")
+    p_arch.add_argument("--statements-dir", type=str, default="statements", help="Directory to save downloaded PDFs")
+    p_arch.add_argument("--output-dir", type=str, default="output", help="Directory for exported CSVs")
+    p_arch.add_argument("--cache-file", type=str, default="citi_raw_data.json", help="Path to raw JSON cache")
+    p_arch.add_argument("--no-download", action="store_false", dest="download_ready", help="Check status only, do not download")
+    p_arch.add_argument(
+        "--positive-balances",
+        action="store_false",
+        dest="invert_liability",
+        help="Export debt balances as positive numbers instead of negative liabilities",
+    )
+
     args = parser.parse_args()
 
     # Default to 'all' if no command specified
@@ -205,6 +282,16 @@ def main():
             input_file=args.input_file,
             output_dir=args.output_dir,
             statements_dir=getattr(args, "statements_dir", "statements"),
+            invert_liability=args.invert_liability,
+        )
+    elif cmd == "check-archives":
+        run_check_archives(
+            port=args.port,
+            tab_id=args.tab_id,
+            statements_dir=args.statements_dir,
+            output_dir=args.output_dir,
+            cache_file=args.cache_file,
+            download_ready=args.download_ready,
             invert_liability=args.invert_liability,
         )
 
